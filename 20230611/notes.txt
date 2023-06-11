@@ -132,7 +132,47 @@ k8s cpu requests的原理  (即 整个结点cpu被占满的情况下，容器可
 cpu usage = us(或者ni) + sy 
 
 --------------------------如何正确拿到容器CPU的开销-------------------------------
+容器中运行top命令，实际看到的是容器宿主机的 cpu使用率, 原因是 /proc/stat 不包含在任一namespace中，它反应的是整个节点的cpu使用情况
+对于top命令来说，它只能显示整个结点的CPU使用情况，不能显示单个容器的各项cpu的使用率
 
+对于linux主机：
+单个进程CPU使用率计算  /proc/[pid]/stat 计算用户态 跟 内核态的ticks数之和
+系统CPU的使用率 /proc/stat 
 
+如何计算整个容器的cpu使用率？
+cpuacct.stat 包含了两个值，控制组内所有进程的内核态ticks 跟 用户态ticks
+
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# cat cpu.stat 
+usage_usec 2900606
+user_usec 1440885
+system_usec 1459720
+nr_periods 0
+nr_throttled 0
+throttled_usec 0
+nr_bursts 0
+burst_usec 0
+---------------------------------------------------------------------------
+load average =  单位时间内正在运行的进程 + 可运行队列的进程 + 休眠队列中不可打断（TASK_UNINTERRUPTIBLE）的进程     
+
+TASK_UNINTERRUPTIBLE是linux进程状态中的一种，是进程为了等待某个系统资源进入了睡眠状态，并且这个状态是不可以被信号打断的  ps ux | grep " D "   造成D状态进程的原因  主要是disk I/O 跟信号量的访问竞争，目前cgroups 还不能解决 由于D状态的进程导致容器中进程性能下降的原因。 cgrups 更多的是影响以进程为单位进行隔离，而D状态的进程是内核中系统全局资源引入的，所以cgroups影响不了它。
+
+需要监控生产环境中D状态的进程数量，然后对D状态的进程数目异常的节点进行分析，比如磁盘故障引起的D状态进程增加
+
+-----------------------------容器内存--------------------------------------
+容器在系统中被杀掉，只有一种情况 OOM， 容器发生OOM多是因为 memory cgroup 的限制导致的
+
+使用docker inspect container_id  查看容器退出的原因
+
+OOM根据如何选择被杀的进程
+1.进程已经使用的物理内存页面数
+2. 每个进程的 OOM 校准值   /proc/[pid]/oom_score_adj (-1000 - 1000),通过调整这个文件，可以调整进程被OOM杀死的几率
+
+内核函数 oom_badness() 判断杀死哪个进程 的计算方法：
+用系统总的可用页面数 乘以 OOM校准值 再加上  进程已经使用的物理页面数，计算的数值越大，被OOM杀死的几率越大 
+
+k8s memory limits 原理， 调整 memory cgroup 参数  memory.limit_in_bytes 
+
+如何快速定位容器发生了OOM?
+查看内核日志  journalctl -k   或者查看/var/log/message
 
 
