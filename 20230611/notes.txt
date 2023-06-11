@@ -1,0 +1,111 @@
+namespace + cgroups
+
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice# ls | grep docker
+docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope
+docker.service
+docker.socket
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice# docker ps
+CONTAINER ID   IMAGE                 COMMAND           CREATED       STATUS       PORTS     NAMES
+3ec18d539ddd   centos/httpd:latest   "/run-httpd.sh"   4 hours ago   Up 4 hours   80/tcp    inspiring_cray
+
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# cat cgroup.procs 
+5843
+5875
+5876
+5877
+5878
+5879
+5880
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# cat cgroup.procs 
+5843
+5875
+5876
+5877
+5878
+5879
+5880
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# ls 
+cgroup.controllers      cgroup.threads         cpuset.mems            hugetlb.1GB.events.local  hugetlb.2MB.numa_stat     memory.events        memory.pressure       misc.current
+cgroup.events           cgroup.type            cpuset.mems.effective  hugetlb.1GB.max           hugetlb.2MB.rsvd.current  memory.events.local  memory.reclaim        misc.events
+cgroup.freeze           cpu.idle               cpu.stat               hugetlb.1GB.numa_stat     hugetlb.2MB.rsvd.max      memory.high          memory.stat           misc.max
+cgroup.kill             cpu.max                cpu.uclamp.max         hugetlb.1GB.rsvd.current  io.max                    memory.low           memory.swap.current   pids.current
+cgroup.max.depth        cpu.max.burst          cpu.uclamp.min         hugetlb.1GB.rsvd.max      io.pressure               memory.max           memory.swap.events    pids.events
+cgroup.max.descendants  cpu.pressure           cpu.weight             hugetlb.2MB.current       io.prio.class             memory.min           memory.swap.high      pids.max
+cgroup.procs            cpuset.cpus            cpu.weight.nice        hugetlb.2MB.events        io.stat                   memory.numa_stat     memory.swap.max       rdma.current
+cgroup.stat             cpuset.cpus.effective  hugetlb.1GB.current    hugetlb.2MB.events.local  io.weight                 memory.oom.group     memory.zswap.current  rdma.max
+cgroup.subtree_control  cpuset.cpus.partition  hugetlb.1GB.events     hugetlb.2MB.max           memory.current            memory.peak          memory.zswap.max
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# ls | grep memory.li
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# ls | grep limit
+
+kill pid SIGTERM 15 default 可以被捕获 用于处理graceful-shutdown
+kill -9 pid SIGKILL 9  不可以被捕获或者忽略  特权信号
+
+内核决定给1号进程发送信号的时候，会调用sig_task_ignored来判断是否忽略
+sig_task_ignored() 收到信号后会做一个判断，决定什么情况下内核会忽略掉信号不再处理,如果下面的三个条件都满足，这个信号就不会发送给进程
+  值force 同一个namespace发出的信号值一直是0  !0 满足
+  信号的handler是否是SIG_DFL,是就忽略，对于每个信号，如果用户进程不自己注册一个自己的handler,就会有一个系统缺省的handler,这个缺省的handler就是SIG_DFL  SIG_KILL满足（不允许被捕获，不允许自定义handler,handler是DFL），SIG_TERM如果没有自己注册handler,也是满足的
+  SIGNAL_UNKILLABLE标签 flag ，只要是一号进程，就会有这个flag,满足
+  关键是第二个条件，handler == DFL linux内核针对每个namespace里的init进程，把只有default handler的信号给忽略掉了
+
+  所以init进程永远不能被SIGKILL杀死，可以被SIGTERM杀死 
+
+  kill -9 1在容器中不工作，内核阻止了1号进程对sigkill特权信号的响应(信号的handler是 DFL)
+  kill 1 分为两种情况，如果1号进程没有注册sigterm的handler,对sigterm信号不响应(C)，如果注册了sigterm的信号的handler,那么可以响应sigterm的信号（golang）
+  
+  1号进程是第一个用户态进程，由它直接或者间接创建了namespace中的其他进程
+
+  linux 31个信号量 
+
+  进程处理信号的三个情况：
+  忽略 SIGKILL SIGSTOP除外
+  捕获 进程注册自己的handler 捕获信号自己处理,而不会执行缺省代码
+  缺省 
+
+  进程或者线程 task_struct{}结构体
+
+  linux机器允许创建的最大进程数目 
+  /proc/sys/kernel/pid_max中
+
+  限制容器中允许创建的最大进程数目  /sys/fs/cgroup/pids
+
+ 容器中允许被创建的最大进程数 
+ [root@3ec18d539ddd cgroup]# cat /sys/fs/cgroup/pids.max 
+2232
+
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# ls | grep pids.max 
+pids.max
+root@joedlut-virtual-machine:/sys/fs/cgroup/system.slice/docker-3ec18d539ddd09c53b35aa970330ff08c2da58f6ffc37f3624a58d0eabe88f76.scope# cat pids.max 
+2232
+echo 1002 > pids.max
+
+残留的僵尸进程依然占据着进程号资源，很有可能导致新的进程不能流转
+
+如何处理僵尸进程？
+僵尸进程产生的原因： 父进程创建之后就不再负责
+解决： 父进程调用wait()系统调用，回收僵尸进程最后的资源，进程号
+
+wait()是 阻塞的系统调用，没有子进程是僵尸进程的话，就会阻塞住
+改用waitpid() 使用WHOHANG的参数，没有僵尸进程就会立即返回。
+---------------------------------------------------------------
+退出清理的操作，一般都是在SIGTERM信号用户注册的handler进行
+
+containerd停止容器的时候，会向容器的init进程发出一个SIGTERM信号，其他进程收到的是SIGKILL信号
+
+两个系统调用
+kill() 发送信号
+signal() 进程收到信号后的行为
+    1.忽略  signal(SIGTERM,SIG_IGN)
+    2.捕获，自定义处理handler signal(SIGTERM,sig_handler)   void sig_handler(int signo)
+    3.缺省 signal(SIGTERM,SIG_DFL)
+
+SIGKILL 跟 SIGSTOP不能被捕获和忽略  signal(SIGKILL,sig_handler)会报错
+
+linux内核处理进程退出：
+do_exit() 回收进程相关资源
+exit_notify() 通知进程相关的父子进程
+zap_pid_ns_processes() 如果处于退出状态的是init进程，向同一个pid namespace的其他进程发送一个SIGKILL信号 
+
+
+
+
+
