@@ -89,14 +89,14 @@ wait()是 阻塞的系统调用，没有子进程是僵尸进程的话，就会�
 ---------------------------------------------------------------
 退出清理的操作，一般都是在SIGTERM信号用户注册的handler进行
 
-containerd停止容器的时候，会向容器的init进程发出一个SIGTERM信号，其他进程收到的是SIGKILL信号
+containerd停止容器的时候，会向容器的init进程发出一个SIGTERM信号，而其他进程收到的是SIGKILL信号 （因为zap_pids_ns_processes()）
 
 两个系统调用
 kill() 发送信号
 signal() 进程收到信号后的行为
     1.忽略  signal(SIGTERM,SIG_IGN)
     2.捕获，自定义处理handler signal(SIGTERM,sig_handler)   void sig_handler(int signo)
-    3.缺省 signal(SIGTERM,SIG_DFL)
+    3.缺省 signal(SIGTERM,SIG_DFL)  比如SIGTERM的缺省就是 terminate
 
 SIGKILL 跟 SIGSTOP不能被捕获和忽略  signal(SIGKILL,sig_handler)会报错
 
@@ -105,6 +105,33 @@ do_exit() 回收进程相关资源
 exit_notify() 通知进程相关的父子进程
 zap_pid_ns_processes() 如果处于退出状态的是init进程，向同一个pid namespace的其他进程发送一个SIGKILL信号 
 
+如何解决容器的应用程序被强制杀死？
+在容器中的init进程中对收到的信号做个转发，发送给容器中的其他子进程，这样容器中的所有进程停止时，都会收到SIGTERM，而不是SIGKILL
+
+
+--------------------------------CPU-------------------------------------
+hi si 的CPU时间不会计入进程的CPU时间，因为他们本身处理的时候，不属于任何一个进程
+ni nice(1-19) 进程优先级比较低的进程运行时候占用的cpu 
+
+cgroup cpu /sys/fs/cgroup/cpu
+每个控制组都是一个子目录，各个控制组的关系就是一个树状层级关系
+普通调度的算法 CFS  completely fair scheduler 完全公平调度器
+1.  cpu.cfs_period_us CFS调度算法的一个调度周期，一般是100ms   100 000   固定值
+2.  cpu.cfs_quota_us 一个调度周期中这个控制组被允许的运行时间，比如50ms  50 000 
+cpu.cfs_quota_us/cpu.cfs_period_us  = 该控制组被允许使用的cpu最大配额   50ms/100ms = 0.5 CPU 
+3. cpu.shares cgroup对于控制组之间的CPU分配比例，默认是1024   group3 3072   group4 1024    group4:group3 = 3:1 
+
+注意： cpu.shares是几个控制组之间的CPU分配比例，一定要等整个结点的cpu都跑满的之后才会发起作用
+
+k8s cpu limits的原理
+k8s 为每个容器都在 cpu cgroup的子系统中新建一个控制组，然后把容器的进程写到这个控制组中， 然后修改  cpu.cfs_quota_us设置limits 
+
+k8s cpu requests的原理  (即 整个结点cpu被占满的情况下，容器可以获取的cpu数目)
+通过设置 cpu.share参数，cpu.shares == 1024表示1个cpu的比例，request cpu的值是n, 给cpu.shares的赋值对应的是 n * 1024
+
+cpu usage = us(或者ni) + sy 
+
+--------------------------如何正确拿到容器CPU的开销-------------------------------
 
 
 
