@@ -175,4 +175,14 @@ k8s memory limits 原理， 调整 memory cgroup 参数  memory.limit_in_bytes
 如何快速定位容器发生了OOM?
 查看内核日志  journalctl -k   或者查看/var/log/message
 
+----------------------------------------------------------------------------------
+memory group不会对内核的内存做限制
+
+用户态内存
+RSS
+   进程真正申请到的物理内存大小  malloc只是把内存的虚拟地址返回给了进程，进程实际对内存读写的时候，系统才会分配内存。
+   RSS = 进程的代码段内存 + 栈内存 + 堆内存 + 共享库内存   查看每一部分的内存大小： /proc/[pid]/smaps
+Page Cache
+
+
 
