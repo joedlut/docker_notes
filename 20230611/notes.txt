@@ -206,7 +206,18 @@ memory cgroup 参数   memory.swappiness 控制 控制组下匿名内存 和 pag
 
 将memory.swappiness = 0 可以让使用swap空间的容器 跟 不需要swap（对应容器的控制组的 memory.swappiness 设置为0 ）的容器一台宿主机上，互不影响
 
+----------------------容器的文件系统--------------------------------------------
+overlay 
+有效减少冗余的镜像数据在网路上的传输，减少磁盘上冗余的镜像数据，针对容器的文件系统 UnionFS
 
+UnionFS 主要功能是将多个目录一起挂在到同一个目录下。
+
+UnionFS的实现  
+    OverlayFS  mount两层目录  lowerdir （只读）    upperdir（可读写） |  merged 挂载点目录（mount point) 用户看到的目录，用户的实际文件操作都在这里进行
+
+容器的镜像文件中各层为 overlayFS的lowerdir层 再加一个空的upperdir层 一起挂在好后，组成了容器的文件系统
+
+    
 
 
 
