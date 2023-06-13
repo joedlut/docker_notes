@@ -185,4 +185,28 @@ RSS
 Page Cache
    进程对磁盘文件进行读写，linux会分配内存，将磁盘读写的页面放到内存中; 作用： 提高磁盘文件的读写性能。
 
+memory cgroup 只是统计了 RSS跟 page cache的内存之和
+RSS + page cache = memory.usage_in_bytes
+
+page cache 的内存在系统需要新申请物理内存的时候是可以被释放掉的， 是linux内核自发的行为，是要读写文件，只要有空闲的内存，就会用作page cache
+
+判断容器的内存使用量，要用memory.stat的rss值，不能用memory.usage_in_bytes(含有page cache)
+
+-----------------------------------------------------------------------------------------
+/proc/sys/vm/swapiness 可以决定系统会有多频繁的使用交换分区 值越大，内核越频繁的使用交换分区。值越低，尽量避免使用交换分区。 默认值 60  取值范围 0-100 
+100 即使有空闲内存，也还是会做内存交换
+0 基本不做内存交换，不写swap空间
+
+linux系统内存紧张时，先释放page cache 还是 先释放匿名内存(malloc)， 通过swapiness来平衡，swapiness更像是一个权重，用来定义page cache内存 和 匿名内存释放的一个比例
+anon_prio : file_prio   =   swapiness : 200 - swapiness = 匿名内存 : page cache 
+
+cat /proc/zoneinfo free < high （water mark）系统会回收匿名内存页面到swap空间  即使swapiness = 0 
+
+memory cgroup 参数   memory.swappiness 控制 控制组下匿名内存 和 page cache的回收，memory swapiness会覆盖全局的swappiness， 与全局的swappiness有一点不同：memory.swappiness = 0 ，对于匿名内存的回收是始终禁止的，始终不会使用swap空间 
+
+将memory.swappiness = 0 可以让使用swap空间的容器 跟 不需要swap（对应容器的控制组的 memory.swappiness 设置为0 ）的容器一台宿主机上，互不影响
+
+
+
+
 
