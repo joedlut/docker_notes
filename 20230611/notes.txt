@@ -303,9 +303,45 @@ root@joedlut-virtual-machine:~# nsenter -t 5843 -n ip addr
 2.修改network namespace  的时机，选在容器刚启动，而容器中的应用程序还没有启动之前进行
 
 可以通过docker的 --sysctl 或者 k8s allowed-unsafe-sysctls特性 在容器启动时修改容器 namespace的参数 
+-------------------------容器的网络配置----------------------------------
+容器内网络不通的问题，如何调试？
 
+veth 是一个虚拟的网络设备，一般是成对创建，namespace之间的通讯通过这对veth设备来进行网络通讯。
 
+通过一对veth设备实现 数据包从容器的network namespace 发送到host的network namespace 
+第二步  bridge + nat ,docker程序 安装完成后，自动建立一个docker0的bridge interface , 将第一步建立的veth_host接入到brige上 
+开启转发 iptables -P FORWWARD ACCEPT 
 
+开启转发
+echo 1 > /proc/sys/net/ipv4/ip_forward 
+root@joedlut-virtual-machine:~# echo 0 > /proc/sys/net/ipv4/ip_forward
+root@joedlut-virtual-machine:~# docker exec -it  3ec18d539ddd  bash
+[root@3ec18d539ddd /]# ping www.baidu.com
+^C
+[root@3ec18d539ddd /]# exit
+exit
+root@joedlut-virtual-machine:~# echo 1 > /proc/sys/net/ipv4/ip_forward
+root@joedlut-virtual-machine:~# docker exec -it  3ec18d539ddd  bash
+[root@3ec18d539ddd /]# ping www.baidu.com
+PING www.a.shifen.com (14.119.104.254) 56(84) bytes of data.
+64 bytes from 14.119.104.254 (14.119.104.254): icmp_seq=1 ttl=127 time=11.5 ms
+64 bytes from 14.119.104.254 (14.119.104.254): icmp_seq=2 ttl=127 time=17.1 ms
+64 bytes from 14.119.104.254 (14.119.104.254): icmp_seq=3 ttl=127 time=9.82 ms
+64 bytes from 14.119.104.254 (14.119.104.254): icmp_seq=4 ttl=127 time=10.2 ms
+--------------------------容器的网络延迟高 ----------------------------
+使用ipvlan/maclan 替换 veth 
+在收发数据包的操作上，处理没有硬中断的处理，vetch处理软中断的处理部分跟真实的网络接口是一样的 
 
+ipvlan manclan的网络接口直接挂在物理网络接口上，对于使用iptables规则的容器（k8s 的service）就不能工作了。
+----------------------------容器中的网络乱序包--------------------------
+网络中发生了数据包重传，可能是数据包在网络中丢失了，也可能是数据包乱序导致的
+
+netstat -s  查看重传
+ 
+查看容器的network namespace 中查看重传
+nsenter -t pid -n netstat -s |  grep retran
+
+快速重传：
+如果客户端收到3个重复的ack,那么发送端就可以立刻重新发送ACK对应的下一个数据包，而不用等待发送超时 
 
 
