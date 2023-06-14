@@ -251,5 +251,61 @@ Cgroup V2从架构上允许一个控制组里多个子系统协同运行，针�
 perf  fstrace工具 分析容器中写文件进程的profile. perf得到系统调用write()在内核中的一系列子函数调用，再用ftrace查看这些子函数的调用时间
 跟句fstrace的结果，写数据到page cache的时候，需要不断去释放原有的页面，这个时间开销是最大的。 造成容器中的buffered IO不稳定的原因，正是容器在限制内存之后，page cache的数量较小并且不断申请释放。
 
-针对容器做memory cgroup限制的时候，不仅要考虑进程实际使用的内存量，还要考虑容器中程序IO的量，合理预留足够的内存作为buffered IO的page cache 
+针对容器做memory cgroup限制的时候，不仅要考虑进程实际使用的内存量，还要考虑容器中程序IO的量，合理预留足够的内存作为buffered IO的page cache
+如果知道读写文件的大小，并且知道内存足够的情况下，memory cgroup的限制可以超过这个文件的大小。| 或者程序管理自己的cache 并且调用direct IO来读写文件
+
+当dirty_pages 超过dirty_backgroup_ratio对应的内存量，内核flush线程会把dirty_pages写入磁盘；
+当dirty_pages 超过dirty_ratio对应的内存量，程序写文件的函数调用write()会阻塞住，直到这次调用的dirty_pages全部写入到磁盘中。 
+-------------------------------容器网络隔离---------------------------------
+network namespace隔离了哪些资源？
+1.网络设备 
+2.ipv4  ipv6协议栈
+3.ip 路由表
+4. iptables规则
+5. 网络状态信息  /proc/net  
+
+如何建立一个新的network namespace
+通过clone() 或者 unshare建立新的network namespace 
+
+clone() 系统调用加上 CLONE_NEWNET flag实现  新的进程，新的network namespace 
+
+unshare() 直接改变当前进程的network namespace
+
+或者使用命令行创建  ip netns 
+
+lsns -t net 查看系统已有的network namespace 
+
+使用nsenter 查看某个net namespace的网络配置
+
+
+root@joedlut-virtual-machine:~# lsns -t net
+        NS TYPE NPROCS   PID USER       NETNSID NSFS                           COMMAND
+4026531840 net     361     1 root    unassigned                                /sbin/init splash
+4026532640 net       1   797 root    unassigned                                ├─/usr/libexec/accounts-daemon
+4026532770 net       1  1014 rtkit   unassigned                                └─/usr/libexec/rtkit-daemon
+4026532711 net       8  5843 root             0 /run/docker/netns/ac5eb25d8a1c /bin/sh /usr/sbin/apachectl -DFOREGROUND
+4026532851 net       2 14455 joedlut unassigned                                /usr/bin/bwrap --args 33 -- /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebProcess 11 28
+root@joedlut-virtual-machine:~# nsenter -t 5843 -n ip addr 
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+4: eth0@if5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+
+
+如何修改容器中的network namespace的网络参数？
+普通容器的/proc/sys 是readonly mount的，容器启动以后，我们无法再容器内部修改 /proc/sys/net下网络相关的参数
+
+1. 宿主机如果有root权限，使用nsenter 工具修改，不被允许
+2.修改network namespace  的时机，选在容器刚启动，而容器中的应用程序还没有启动之前进行
+
+可以通过docker的 --sysctl 或者 k8s allowed-unsafe-sysctls特性 在容器启动时修改容器 namespace的参数 
+
+
+
+
+
 
