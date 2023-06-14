@@ -217,7 +217,39 @@ UnionFS的实现
 
 容器的镜像文件中各层为 overlayFS的lowerdir层 再加一个空的upperdir层 一起挂在好后，组成了容器的文件系统
 
-    
+-----------------------------------------------------------------------------
+overlayFS  upperdir lowerdir
+往upperdir写数据实际写入的是宿主机的磁盘
+     
+XFS ext4  Quota 特性 限制一个用户，一个用户组或者一个project来限制他们使用文件系统的维度
 
+如何限制容器不会写满宿主机的磁盘？
+针对 overlayFS的upperdir做 XFS quota的限流
 
+---------------------------------------------------------
+限制容器io 的读写性能
+blkio cgroup 
+磁盘的性能指标：
+IOPS   每秒磁盘中数据的读写的次数
+Throughout  吞吐量 每秒磁盘中数据的读取量  MB/s
+
+IOPS固定的情况下  吞吐量 = 数据块大小 * IOPS
+
+/sys/fs/cgroup/blkio 创建子目录作为控制组 
+
+direct I/O  bufferd IO
+
+Cgroup V1 blkio控制子系统 只能对Direct IO的读写文件做磁盘限速，对于Buffered IO的文件读写，它无法进行磁盘限速； 因为buffered IO会把数据先写入到内存page cache中，内核线程把数据写入磁盘，而Cgroup V1 blkio的子系统独立于memory子系统，无法统计到由page cache刷入到磁盘的数据量
+Cgroup V2从架构上允许一个控制组里多个子系统协同运行，针对buffered IO进行磁盘读写的限速
+---------------------------------------------------------------
+容器做内存限制的时候，cgroup 中memory.limit_in_bytes设置的比较小，容器中进程有很多大量io,这样申请新的page cache内存时会不断释放老的内存页面，这些操作会带来额外的系统开销。
+
+容器中使用buffered IO方式写文件的时候，会出现写入时间的波动，这是由于文件会先写到内存里，这样就产生了大量的dirty pages
+
+有时间做一下这个实验
+
+perf  fstrace工具 分析容器中写文件进程的profile. perf得到系统调用write()在内核中的一系列子函数调用，再用ftrace查看这些子函数的调用时间
+跟句fstrace的结果，写数据到page cache的时候，需要不断去释放原有的页面，这个时间开销是最大的。 造成容器中的buffered IO不稳定的原因，正是容器在限制内存之后，page cache的数量较小并且不断申请释放。
+
+针对容器做memory cgroup限制的时候，不仅要考虑进程实际使用的内存量，还要考虑容器中程序IO的量，合理预留足够的内存作为buffered IO的page cache 
 
